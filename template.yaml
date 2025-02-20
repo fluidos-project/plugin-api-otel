@@ -1,0 +1,323 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: collector-config
+  namespace: monitoring
+data:
+  collector.yaml: |-
+    receivers:
+      hostmetrics:
+        collection_interval: 30s
+        scrapers:
+          cpu:
+          memory:
+          network:
+      kubeletstats:
+        collection_interval: 20s
+        auth_type: "serviceAccount"
+        endpoint: https://10.208.99.106:10250
+        insecure_skip_verify: true
+        metric_groups:
+          - container
+          - pod
+          - volume
+          - node
+        extra_metadata_labels:
+          - container.id
+        k8s_api_config:
+          auth_type: serviceAccount
+      k8s_events:
+        auth_type : "serviceAccount"   
+      k8s_cluster:
+        collection_interval: 10s
+        node_conditions_to_report: [Ready, MemoryPressure, DiskPressure, NetworkUnavailable]
+        allocatable_types_to_report: [cpu, memory, storage, ephemeral-storage]
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+            # max_recv_msg_size_mib: 4
+          http:
+            endpoint: 0.0.0.0:8090
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: "prometheus"
+              scrape_interval: 10s
+              kubernetes_sd_configs:
+                - role: pod
+              relabel_configs:
+                - source_labels:
+                    [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                  regex: "true"
+                  action: keep
+                - source_labels:
+                    [
+                      __address__,
+                      __meta_kubernetes_pod_annotation_prometheus_io_port,
+                    ]
+                  action: replace
+                  target_label: __address__
+                  regex: ([^:]+)(?::\d+)?;(\d+)
+                  replacement: $$1:$$2
+            # - job_name: "otel-collector"
+            #   scrape_interval: 10s
+            #   static_configs:
+            #     - targets: ["opentelemetrycollector.monitoring.svc.cluster.local:8090"]
+            # Scrape cAdvisor metrics
+            - job_name: "kube-state-metrics"
+              params:
+                format: [prometheus]
+              honor_labels: true
+              static_configs:
+                - targets: ['kube-state-metrics.kube-system.svc.cluster.local:8080']
+            - job_name: 'node-exporter'
+              bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+              scheme: https
+              kubernetes_sd_configs:
+                - role: node
+              relabel_configs:
+              - source_labels: [__address__]
+                regex: ^(.*):\d+$
+                target_label: __address__
+                replacement: $$1:9100
+              - target_label: __scheme__
+                replacement: http
+              # Host name
+              - source_labels: [__meta_kubernetes_node_name]
+                target_label: instance
+              - source_labels: [__meta_kubernetes_node_address_InternalIP]
+                target_label: ip_address
+            - job_name: integrations/kubernetes/cadvisor
+              bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+              kubernetes_sd_configs:
+                  - role: node
+              relabel_configs:
+                  - replacement: kubernetes.default.svc.cluster.local:443
+                    target_label: __address__
+                  - regex: (.+)
+                    replacement: /api/v1/nodes/$${1}/proxy/metrics/cadvisor
+                    source_labels:
+                      - __meta_kubernetes_node_name
+                    target_label: __metrics_path__
+              scheme: https
+              tls_config:
+                  ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+                  insecure_skip_verify: false
+                  server_name: kubernetes
+            - job_name: 'kubernetes-cadvisor'
+              scheme: https
+              tls_config:
+                ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+              kubernetes_sd_configs:
+              - role: node
+              relabel_configs:
+              - action: labelmap
+                regex: __meta_kubernetes_node_label_(.+)
+              - target_label: __address__
+                replacement: kubernetes.default.svc:443
+              - source_labels: [__meta_kubernetes_node_name]
+                regex: (.+)
+                target_label: __metrics_path__
+                replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
+            # Scrape config for API servers
+            - job_name: "kubernetes-apiservers"
+              kubernetes_sd_configs:
+                - role: endpoints
+              scheme: https
+              tls_config:
+                ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+                insecure_skip_verify: true
+              bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+              relabel_configs:
+              - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+                action: keep
+                regex: default;kubernetes;https
+            - job_name: 'kubernetes-nodes'
+              scheme: https
+              tls_config:
+                ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+              kubernetes_sd_configs:
+              - role: node
+              relabel_configs:
+              - action: labelmap
+                regex: __meta_kubernetes_node_label_(.+)
+              - target_label: __address__
+                replacement: kubernetes.default.svc:443
+              - source_labels: [__meta_kubernetes_node_name]
+                regex: (.+)
+                target_label: __metrics_path__
+                replacement: /api/v1/nodes/$${1}/proxy/metrics
+            - job_name: 'kubernetes-pods'
+              kubernetes_sd_configs:
+              - role: pod
+              relabel_configs:
+              - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                action: keep
+                regex: true
+              - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+                action: replace
+                target_label: __metrics_path__
+                regex: (.+)
+              - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                action: replace
+                regex: ([^:]+)(?::\d+)?;(\d+)
+                replacement: $$1:$$2
+                target_label: __address__
+              - action: labelmap
+                regex: __meta_kubernetes_pod_label_(.+)
+              - source_labels: [__meta_kubernetes_namespace]
+                action: replace
+                target_label: kubernetes_namespace
+              - source_labels: [__meta_kubernetes_pod_name]
+                action: replace
+                target_label: kubernetes_pod_name
+            - job_name: 'kubernetes-service-endpoints'
+              kubernetes_sd_configs:
+              - role: endpoints
+              relabel_configs:
+              - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+                action: keep
+                regex: true
+              - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scheme]
+                action: replace
+                target_label: __scheme__
+                regex: (https?)
+              - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
+                action: replace
+                target_label: __metrics_path__
+                regex: (.+)
+              - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
+                action: replace
+                target_label: __address__
+                regex: ([^:]+)(?::\d+)?;(\d+)
+                replacement: $$1:$$2
+              - action: labelmap
+                regex: __meta_kubernetes_service_label_(.+)
+              - source_labels: [__meta_kubernetes_namespace]
+                action: replace
+                target_label: kubernetes_namespace
+              - source_labels: [__meta_kubernetes_service_name]
+                action: replace
+                target_label: kubernetes_name
+
+
+    processors:
+      attributes/nodename:
+        actions:
+          - action: insert
+            key: node.name
+            from_attribute: k8s.node.name 
+      filter:
+        metrics:
+          exclude:
+            match_type: regexp
+            metric_names:
+              - "duplicated_metric_name_regex"
+      resourcedetection/system:
+        detectors: [env, system, gcp, eks]
+        timeout: 2s
+        override: false 
+      resource/k8s_events:
+        attributes:
+          - action: insert
+            key: domain
+            value: 'UMU'
+          - action: insert
+            key: cluster
+            value: liqo-Spain      
+          - action: insert
+            key: job
+            value: 'integrations/kubernetes/eventhandler'
+          - action: insert
+            key: loki.resource.labels
+            value: pod, namespace, container, cluster, filename
+      attributes/metrics:
+        actions:
+          - action: insert
+            key: domain
+            value: UMU
+          - action: insert
+            key: cluster
+            value: liqo-Spain                     
+      resource:
+        attributes:
+          - action: insert
+            key: domain
+            value: UMU
+          - action: insert
+            key: cluster
+            value: liqo-Spain
+          - action: insert
+            from_attribute: k8s.pod.uid
+            key: service.instance.id
+          - action: insert
+            from_attribute: k8s.pod.ip
+            key: service.instance.ip
+          - action: insert
+            from_attribute: k8s.pod.name
+            key: k8s.pod.name
+          - action: insert
+            key: node.name
+            from_attribute: k8s.node.name 
+      batch:
+        send_batch_size: 10000
+        timeout: 5s
+      k8sattributes:
+        auth_type: "serviceAccount"
+        passthrough: false
+        filter:
+          node_from_env_var: KUBE_NODE_NAME
+        extract:
+          metadata:
+          - k8s.namespace.name
+          - k8s.deployment.name
+          - k8s.statefulset.name
+          - k8s.daemonset.name
+          - k8s.cronjob.name
+          - k8s.job.name
+          - k8s.node.name
+          - k8s.pod.name
+          - k8s.pod.uid
+          - k8s.pod.start_time
+          - k8s.pod.hostname
+          labels:
+            - tag_name: app.label.component
+              key: app.kubernetes.io/component
+              from: pod
+        pod_association:
+        - sources:
+          - from: resource_attribute
+            name: k8s.pod.ip
+        - sources:
+          - from: resource_attribute
+            name: k8s.pod.uid
+        - sources:
+          - from: connection
+        - sources:
+          - from: resource_attribute
+            name: k8s.namespace.name
+        - sources:
+          - from: resource_attribute
+            name: k8s.pod.uid
+        - sources:
+          - from: resource_attribute
+            name: k8s.pod.name
+    exporters:
+      prometheusremotewrite:
+        endpoint: "http://prometheus-operator-kube-p-prometheus.monitoring.svc.cluster.local:9090/api/v1/write"
+      logging:
+        loglevel: debug
+    extensions:
+      health_check: {}
+      memory_ballast:
+        size_mib: 683
+    service:
+      extensions: [memory_ballast, health_check]
+      pipelines:
+        metrics:
+          receivers: [kubeletstats, prometheus, otlp, k8s_cluster, hostmetrics]
+          processors: [attributes/metrics, k8sattributes, resource, batch]
+          exporters: [prometheusremotewrite, logging]

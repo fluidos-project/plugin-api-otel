@@ -1,11 +1,23 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+# from fastapi import FastAPI, HTTPException
+# from pydantic import BaseModel, Json
 import yaml
-from kubernetes import client, config
+# from kubernetes import client, config
+from typing import Any
 import subprocess
 
 # Initialize FastAPI
 app = FastAPI()
+
+
+class OTELConfiguration(BaseModel):
+    namespace: str
+    receivers:  Json[Any]
+    processors: Json[Any]
+    exporters:  Json[Any]
+    service:    Json[Any]
+
+
+
 
 # Data model for the pipeline request
 class PipelineRequest(BaseModel):
@@ -20,6 +32,7 @@ class UpdatePipelineRequest(BaseModel):
     newExporter: str = None
     newProcessors: dict = None
 
+
 # Load Kubernetes configuration
 def load_kubernetes_config():
     try:
@@ -29,59 +42,115 @@ def load_kubernetes_config():
         # Load kubeconfig for external execution
         config.load_kube_config()
 
-# Update the ConfigMap with the new pipeline configuration
-def update_configmap(namespace: str, configmap_name: str, new_data: dict):
-    load_kubernetes_config()
-    v1 = client.CoreV1Api()
 
-    # Retrieve the current ConfigMap
-    configmap = v1.read_namespaced_config_map(configmap_name, namespace)
-    configmap_yaml = yaml.safe_load(configmap.data['collector.yaml'])
+# Update receiver structure
+def __update_receiver(receiver: dict, configmap: dict):
+    if receiver:
+        for r in receiver:
+            # Check level matches
+            if r in configmap:
+                configmap = configmap[r]
+                continue 
+            else:
+                configmap.extend(r)
+    print(configmap)
+
+
+def __update_processor(processor: dict, configmap: dict):
+    if processor:
+        for p in processor:
+            # Check level matches
+            if p in configmap:
+                configmap = configmap[p]
+                continue 
+            else:
+                configmap.extend(p)
+    print(configmap)
+
+
+def __load_test_configmap(configmapfile):
+    with open("test/template.yaml") as file:
+        try:
+            return yaml.safe_load(file) 
+        except yaml.YAMLError as exc:
+            print(exc)
+
+# Update the ConfigMap with the new pipeline configuration
+def update_configmap(namespace: str, configmap_name: str, new_pipeline: dict):
+    try:
+        load_kubernetes_config()
+        v1 = client.CoreV1Api()
+        # Retrieve the current ConfigMap
+        configmap_yaml = v1.read_namespaced_config_map(configmap_name, namespace)
+        configmap      = yaml.safe_load(configmap_yaml.data['collector.yaml'])
+    except:
+        print("No Kubeconfig, entering DEBUG mode")
+        configmap = __load_test_configmap(__load_test_configmap)
+        print(f"TESTING: {configmap}")
 
     # Extract pipeline details
-    domainID = new_data["domainID"]
-    flavorID = new_data["flavorID"]
-    exporter = new_data["prometheusExporter"]
+    receiver    = new_pipeline['receivers']
+    processor   = new_pipeline['processors']
+    exporter    = new_pipeline['exporters']
+    service     = new_pipeline['service']
 
-    # Define the new filter
-    filter_name = f"filter/basicmetrics{domainID}{flavorID}"
-    configmap_yaml["processors"][filter_name] = {
-        "error_mode": "ignore",
-        "metrics": {
-            "metric": [
-                f'resource.attributes["k8s.node.name"] != "{flavorID}"'
-            ]
-        }
-    }
+    __update_receiver(receiver, configmap['receiver'])
 
-    # Define the new exporter
-    exporter_name = f"prometheusremotewrite/{domainID}"
-    configmap_yaml["exporters"][exporter_name] = {
-        "endpoint": exporter
-    }
 
-    # Define the new pipeline
-    pipeline_name = f"metrics/{domainID}{flavorID}"
-    configmap_yaml["service"]["pipelines"][pipeline_name] = {
-        "receivers": ["kubeletstats", "prometheus", "otlp", "k8s_cluster", "hostmetrics"],
-        "processors": [filter_name, "attributes/metrics", "k8sattributes", "resource", "batch"],
-        "exporters": [exporter_name]
-    }
 
-    # Auxiliary action: add an attribute to verify updates
-    configmap_yaml["processors"]["attributes/metrics"]["actions"].append({
-        "action": "insert",
-        "key": "source",
-        "value": "opentelemetry"
-    })
+# Update the ConfigMap with the new pipeline configuration
+# def update_configmap(namespace: str, configmap_name: str, new_data: dict):
+#     load_kubernetes_config()
+#     v1 = client.CoreV1Api()
 
-    # Convert the updated dictionary back to YAML
-    updated_yaml = yaml.safe_dump(configmap_yaml)
-    configmap.data['collector.yaml'] = updated_yaml
+#     # Retrieve the current ConfigMap
+#     configmap = v1.read_namespaced_config_map(configmap_name, namespace)
+#     configmap_yaml = yaml.safe_load(configmap.data['collector.yaml'])
 
-    # Apply the updated ConfigMap
-    v1.replace_namespaced_config_map(configmap_name, namespace, configmap)
-    print(f"ConfigMap '{configmap_name}' successfully updated.")
+#     # Extract pipeline details
+#     domainID = new_data["domainID"]
+#     flavorID = new_data["flavorID"]
+#     exporter = new_data["prometheusExporter"]
+
+#     # Define the new filter
+#     filter_name = f"filter/basicmetrics{domainID}{flavorID}"
+#     configmap_yaml["processors"][filter_name] = {
+#         "error_mode": "ignore",
+#         "metrics": {
+#             "metric": [
+#                 f'resource.attributes["k8s.node.name"] != "{flavorID}"'
+#             ]
+#         }
+#     }
+
+#     # Define the new exporter
+#     exporter_name = f"prometheusremotewrite/{domainID}"
+#     configmap_yaml["exporters"][exporter_name] = {
+#         "endpoint": exporter
+#     }
+
+#     # Define the new pipeline
+#     pipeline_name = f"metrics/{domainID}{flavorID}"
+#     configmap_yaml["service"]["pipelines"][pipeline_name] = {
+#         "receivers": ["kubeletstats", "prometheus", "otlp", "k8s_cluster", "hostmetrics"],
+#         "processors": [filter_name, "attributes/metrics", "k8sattributes", "resource", "batch"],
+#         "exporters": [exporter_name]
+#     }
+
+#     # Auxiliary action: add an attribute to verify updates
+#     configmap_yaml["processors"]["attributes/metrics"]["actions"].append({
+#         "action": "insert",
+#         "key": "source",
+#         "value": "opentelemetry"
+#     })
+
+#     # Convert the updated dictionary back to YAML
+#     updated_yaml = yaml.safe_dump(configmap_yaml)
+#     configmap.data['collector.yaml'] = updated_yaml
+
+#     # Apply the updated ConfigMap
+#     v1.replace_namespaced_config_map(configmap_name, namespace, configmap)
+#     print(f"ConfigMap '{configmap_name}' successfully updated.")
 
 
 # Update the ConfigMap by removing a pipeline
@@ -173,6 +242,23 @@ def send_signal_to_pod(namespace, pod_name, signal="HUP"):
     
     
 # Endpoints
+
+# Endpoint to create a new pipeline
+@app.post("/configuration")
+def add_pipeline(request: PipelineRequest):
+    try:
+        namespace = "monitoring"
+        configmap_name = "collector-config"
+
+        # Update the ConfigMap with the new pipeline
+        update_configmap(namespace, configmap_name, request.dict())
+
+        return {"message": "Pipeline created and ConfigMap successfully updated."}
+    except Exception as e:
+        print(f"Error updating ConfigMap: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
     
 # Endpoint to create a new pipeline
 @app.post("/addpipeline/transfermetrics")
@@ -306,5 +392,7 @@ def reload_config():
 
 # Run the FastAPI app with Uvicorn
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("agent:app", host="0.0.0.0", port=8000, reload=True)
+    # import uvicorn
+    # uvicorn.run("agent:app", host="0.0.0.0", port=8000, reload=True)
+    new_pipeline = {'receivers': {'hostmetrics': {'testing': 1} }}
+    update_configmap(None, None, new_pipeline)

@@ -3,3 +3,4 @@ pydantic
 pyyaml
 kubernetes
 uvicorn
+pyyaml

@@ -1,7 +1,7 @@
-# from fastapi import FastAPI, HTTPException
-# from pydantic import BaseModel, Json
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Json
 import yaml
-# from kubernetes import client, config
+from kubernetes import client, config
 from typing import Any
 import subprocess
 
@@ -38,37 +38,21 @@ def load_kubernetes_config():
     try:
         # Load in-cluster configuration when running inside the cluster
         config.load_incluster_config()
-    except:
+    except config.ConfigException:
         # Load kubeconfig for external execution
         config.load_kube_config()
 
 
 # Update receiver structure
-def __update_receiver(receiver: dict, configmap: dict):
-    if receiver:
-        for r in receiver:
+def __update_configmap(new_configmap: dict, configmap: dict): 
+    for key, value in new_configmap.items():
+        if key in configmap and isinstance(value, dict):
             # Check level matches
-            if r in configmap:
-                configmap = configmap[r]
-                continue 
-            else:
-                configmap.extend(r)
-    print(configmap)
+            __update_configmap(value, configmap[key])
+        else:
+            configmap[key] = value
 
-
-def __update_processor(processor: dict, configmap: dict):
-    if processor:
-        for p in processor:
-            # Check level matches
-            if p in configmap:
-                configmap = configmap[p]
-                continue 
-            else:
-                configmap.extend(p)
-    print(configmap)
-
-
-def __load_test_configmap(configmapfile):
+def __load_test_configmap():
     with open("test/template.yaml") as file:
         try:
             return yaml.safe_load(file) 
@@ -85,17 +69,19 @@ def update_configmap(namespace: str, configmap_name: str, new_pipeline: dict):
         configmap      = yaml.safe_load(configmap_yaml.data['collector.yaml'])
     except:
         print("No Kubeconfig, entering DEBUG mode")
-        configmap = __load_test_configmap(__load_test_configmap)
+        configmap = yaml.safe_load(__load_test_configmap()['data']['collector.yaml'])
         print(f"TESTING: {configmap}")
 
     # Extract pipeline details
-    receiver    = new_pipeline['receivers']
-    processor   = new_pipeline['processors']
-    exporter    = new_pipeline['exporters']
-    service     = new_pipeline['service']
-
-    __update_receiver(receiver, configmap['receiver'])
-
+    receiver    = new_pipeline['receivers']  if 'receivers' in new_pipeline else None
+    processor   = new_pipeline['processors'] if 'processors' in new_pipeline else None 
+    exporter    = new_pipeline['exporters']  if 'exporters' in new_pipeline else None 
+    service     = new_pipeline['service'] if 'service' in new_pipeline else None
+    
+    updates_new_configmaps = [receiver, processor, exporter, service]
+    for new_configmap in updates_new_configmaps:
+        __update_configmap(new_configmap, configmap['receivers'])
+    print('Se guardo?', configmap)
 
 
 # Update the ConfigMap with the new pipeline configuration
@@ -394,5 +380,5 @@ def reload_config():
 if __name__ == "__main__":
     # import uvicorn
     # uvicorn.run("agent:app", host="0.0.0.0", port=8000, reload=True)
-    new_pipeline = {'receivers': {'hostmetrics': {'testing': 1} }}
+    new_pipeline = {'receivers': {'hostmetrics': {'collection_interval': '1s'}, 'kubeletstats': {'collection_interval': '1'} }}
     update_configmap(None, None, new_pipeline)

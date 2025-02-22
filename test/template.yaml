@@ -321,3 +321,8 @@ data:
           receivers: [kubeletstats, prometheus, otlp, k8s_cluster, hostmetrics]
           processors: [attributes/metrics, k8sattributes, resource, batch]
           exporters: [prometheusremotewrite, logging]
+        metrics/fluidosmonitoring:
+          receivers: [otlp]
+          processors: [attributes/metrics, k8sattributes, resource, batch]
+          exporters: [prometheusremotewrite/domainID, logging]
+

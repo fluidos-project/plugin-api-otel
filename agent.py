@@ -1,8 +1,8 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Json
+from pydantic import BaseModel
 import yaml
 from kubernetes import client, config
-from typing import Any
+from typing import Any, Dict
 import subprocess
 
 # Initialize FastAPI
@@ -10,26 +10,12 @@ app = FastAPI()
 
 
 class OTELConfiguration(BaseModel):
-    namespace: str
-    configmap_name: str
-    receivers:  Json[Any]
-    processors: Json[Any]
-    exporters:  Json[Any]
-    service:    Json[Any]
-
-# # Data model for the pipeline request
-# class PipelineRequest(BaseModel):
-#     prometheusExporter: str
-#     domainID: str
-#     flavorID: str
-
-# # Data model for updating an existing pipeline
-# class UpdatePipelineRequest(BaseModel):
-#     domainID: str
-#     flavorID: str
-#     newExporter: str = None
-#     newProcessors: dict = None
-
+    namespace: Any
+    configmap_name: Any
+    receivers: Dict[str, Any]
+    processors: Dict[str, Any]
+    exporters: Dict[str, Any]
+    service: Dict[str, Any]
 
 # Load Kubernetes configuration
 def load_kubernetes_config():
@@ -72,6 +58,7 @@ def update_configmap(namespace: str, configmap_name: str, new_pipeline: dict):
         v1 = client.CoreV1Api()
         # Retrieve the current ConfigMap
         configmap_yaml = v1.read_namespaced_config_map(configmap_name, namespace)
+        print(configmap_yaml.data)
         configmap      = yaml.safe_load(configmap_yaml.data['collector.yaml'])
     except Exception as e:
         if configmap_name is None:
@@ -85,11 +72,22 @@ def update_configmap(namespace: str, configmap_name: str, new_pipeline: dict):
     receiver    = new_pipeline['receivers']  if 'receivers' in new_pipeline else None
     processor   = new_pipeline['processors'] if 'processors' in new_pipeline else None 
     exporter    = new_pipeline['exporters']  if 'exporters' in new_pipeline else None 
-    service     = new_pipeline['service'] if 'service' in new_pipeline else None
+    service     = new_pipeline['service']    if 'service' in new_pipeline else None
     
     updates_new_configmaps = [receiver, processor, exporter, service]
+    
     for new_configmap in updates_new_configmaps:
         __update_configmap(new_configmap, configmap['receivers'])
+    if configmap_name is not None:
+        try:
+            v1.replace_namespaced_config_map(configmap_name, namespace, configmap)
+            return configmap
+        except Exception as e:
+            raise Exception(status_code=500, detail=f"Fail to replace configmap: {e}")
+    else:
+        return configmap
+        
+        
         
         
 def add_configmap(namespace: str, configmap_name: str, new_configmap: dict):
@@ -140,7 +138,6 @@ def remove_configmap(namespace: str, configmap_name: str, remove_pipeline: dict)
     update_remove_configmaps = [(receiver, 'receivers'), (processor, 'processors'), (exporter, 'exporters'), (service, 'service')]
     for new_configmap in update_remove_configmaps:
         __remove_configmap(new_configmap[0], configmap[new_configmap[1]])
-    print('Se eliminó?', configmap)
 
 
 # Update the ConfigMap with the new pipeline configuration
@@ -292,13 +289,14 @@ def send_signal_to_pod(namespace, pod_name, signal="HUP"):
 @app.put("/configurations")
 def update_pipeline(request: OTELConfiguration):
     try:
-        namespace = request.model_dump()['namespace']
-        configmap_name = request.model_dump()['collector-config']
+        data = request.model_dump()
+        namespace = data['namespace'] if 'namespace' in data else None
+        configmap_name = data['configmap_name'] if 'configmap_name' in data  else None
 
         # Update the ConfigMap with the new pipeline
-        update_configmap(namespace, configmap_name, request.model_dump())
+        new_configmap = update_configmap(namespace, configmap_name, request.model_dump())
 
-        return {"message": "Pipeline created and ConfigMap successfully updated."}
+        return {"message": "Pipeline created and ConfigMap successfully updated", "configmap": new_configmap}
     except Exception as e:
         print(f"Error updating ConfigMap: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -307,13 +305,14 @@ def update_pipeline(request: OTELConfiguration):
 @app.post("/configurations")
 def add_pipeline(request: OTELConfiguration):
     try:
-        namespace = request.model_dump()['namespace']
-        configmap_name = request.model_dump()['collector-config']
+        data = request.model_dump()
+        namespace = data['namespace'] if 'namespace' in data else None
+        configmap_name = data['configmap_name'] if 'configmap_name' in data  else None
 
         # Update the ConfigMap with the new pipeline
-        add_configmap(namespace, configmap_name, request.model_dump())
+        new_configmap = add_configmap(namespace, configmap_name, request.model_dump())
 
-        return {"message": "Pipeline created and ConfigMap successfully updated."}
+        return {"message": "Pipeline created and ConfigMap successfully updated", "configmap": new_configmap}
     except Exception as e:
         print(f"Error updating ConfigMap: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -322,15 +321,39 @@ def add_pipeline(request: OTELConfiguration):
 @app.delete("/configurations")
 def remove_pipeline(request: OTELConfiguration):
     try:
-        namespace = request.model_dump()['namespace']
-        configmap_name = request.model_dump()['collector-config']
+        data = request.model_dump()
+        namespace = data['namespace'] if 'namespace' in data else None
+        configmap_name = data['configmap_name'] if 'configmap_name' in data  else None
 
         # Update the ConfigMap with the new pipeline
         remove_configmap(namespace, configmap_name, request.model_dump())
 
-        return {"message": "Pipeline created and ConfigMap successfully updated."}
+        return {"message": "Pipeline deleted and ConfigMap successfully updated."}
     except Exception as e:
         print(f"Error updating ConfigMap: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
+@app.get("/configurations")
+def list_pipelines():
+    try:
+        namespace = "monitoring"
+        configmap_name = "collector-config"
+        
+        # Load Kubernetes config
+        load_kubernetes_config()
+        v1 = client.CoreV1Api()
+        
+        # Retrieve the current ConfigMap
+        configmap = v1.read_namespaced_config_map(configmap_name, namespace)
+        configmap_yaml = yaml.safe_load(configmap.data['collector.yaml'])
+        
+        # Extract the pipelines
+        pipelines = configmap_yaml.get("service", {}).get("pipelines", {})
+        
+        return {"pipelines": list(pipelines.keys())}
+    except Exception as e:
+        print(f"Error listing pipelines: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     
 
@@ -467,7 +490,7 @@ def reload_config(request: OTELConfiguration):
 
 # Run the FastAPI app with Uvicorn
 if __name__ == "__main__":
-    # import uvicorn
-    # uvicorn.run("agent:app", host="0.0.0.0", port=8000, reload=True)
-    new_pipeline = {'receivers': {'hostmetrics': {'collection_interval': '1s'}, 'kubeletstats': {'collection_interval': '1'} }, 'service': {'pipelines': {'metrics/fluidosmonitoring': {} }}}
-    remove_configmap(None, None, new_pipeline)
+    import uvicorn
+    uvicorn.run("agent:app", host="0.0.0.0", port=8000, reload=True)
+    # new_pipeline = {'receivers': {'hostmetrics': {'collection_interval': '1s'}, 'kubeletstats': {'collection_interval': '1'} }, 'service': {'pipelines': {'metrics/fluidosmonitoring': {} }}}
+    # remove_configmap(None, None, new_pipeline)

@@ -1,0 +1,31 @@
+curl -X PUT http://localhost:8000/configurations \
+  -H "Content-Type: application/json" \
+  -d '{
+  "namespace": null,
+  "configmap_name": null,
+  "receivers": {
+    "hostmetrics": {
+      "collection_interval": "1s"
+    },
+    "kubeletstats": {
+      "collection_interval": "1"
+    }
+  },
+  "processors": {
+    "batch": {}
+  },
+  "exporters": {
+    "prometheus": {
+      "endpoint": "0.0.0.0:8889"
+    }
+  },
+  "service": {
+    "pipelines": {
+      "metrics/fluidosmonitoring": {
+        "receivers": ["hostmetrics", "kubeletstats"],
+        "processors": ["batch"],
+        "exporters": ["prometheus"]
+      }
+    }
+  }
+}'

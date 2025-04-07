@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-api-service
+  namespace: monitoring
+  labels:
+    app: agent-api
+spec:
+  selector:
+    app: agent-api
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8000
+    nodePort: 30002
+  type: NodePort

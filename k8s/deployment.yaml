@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-api
+  namespace: monitoring
+  labels:
+    app: agent-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: agent-api
+  template:
+    metadata:
+      labels:
+        app: agent-api
+    spec:
+      containers:
+      - name: agent-api
+        image: ants-registry.inf.um.es/telemetry/plugin-api-otel:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: KUBERNETES_SERVICE_HOST
+          value: "kubernetes.default.svc.cluster.local"
+        - name: KUBERNETES_SERVICE_PORT
+          value: "443"
+        readinessProbe:
+          httpGet:
+            path: /configurations
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /configurations
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 15

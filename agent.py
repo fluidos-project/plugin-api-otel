@@ -45,19 +45,37 @@ def __update_configmap(new_configmap: dict, configmap: dict):
         raise HTTPException(status_code=500, detail=f"Fail to update configmap: {e}")
             
 # Delete keys from the configmap 
-def __remove_configmap(keys_to_remove: dict, configmap: dict):
+def __remove_configmap(keys_to_remove: dict, configmap: dict, path="") -> list:
     try:
+        removed_paths = []
+
         for key, value in keys_to_remove.items():
+            current_path = f"{path}.{key}" if path else key
+
             if key in configmap:
                 if isinstance(value, dict) and isinstance(configmap[key], dict):
-                    __remove_configmap(value, configmap[key])
+                    sub_removed = __remove_configmap(value, configmap[key], current_path)
+                    removed_paths.extend(sub_removed)
+
+                    if not configmap[key]:  # Subestructura vacía
+                        del configmap[key]
+                        removed_paths.append(current_path)
+
                 elif isinstance(value, list) and isinstance(configmap[key], list):
                     configmap[key] = [item for item in configmap[key] if item not in value]
+                    if not configmap[key]:
+                        del configmap[key]
+                        removed_paths.append(current_path)
+
                 elif configmap[key] == value:
                     del configmap[key]
+                    removed_paths.append(current_path)
+
+        return removed_paths
     except Exception as e:
-        print(f"Error removing configmap: {e}")
-        raise HTTPException(status_code=500, detail=f"Fail to remove configmap: {e}")
+        print(f"Error updating configmap: {e}")
+        raise HTTPException(status_code=500, detail=f"Fail to delete key from configmap: {e}")
+
 
             
 def __load_test_configmap():
@@ -67,28 +85,23 @@ def __load_test_configmap():
         except yaml.YAMLError as exc:
             print(exc)
             
-def __clean_empty(d, parent_key=""):
-    if not isinstance(d, dict):
-        return d
+def __clean_removed_paths(configmap_yaml: dict, removed_paths: list):
+    for path in removed_paths:
+        keys = path.split(".")
+        parent = configmap_yaml
 
-    cleaned = {}
-    for k, v in d.items():
-        current_path = f"{parent_key}.{k}" if parent_key else k
+        for k in keys[:-1]:
+            parent = parent.get(k, {})
+            if not isinstance(parent, dict):
+                break 
 
-        # 'scrapers', dont remove
-        if "scrapers" in current_path.split("."):
-            cleaned[k] = v if not isinstance(v, dict) else __clean_empty(v, current_path)
-            continue
+        last = keys[-1]
+        if isinstance(parent, dict) and last in parent:
+            if isinstance(parent[last], dict) and not parent[last]:
+                del parent[last]
+            elif isinstance(parent[last], list) and not parent[last]:
+                del parent[last]
 
-
-        if isinstance(v, dict):
-            nested = __clean_empty(v, current_path)
-            if nested:
-                cleaned[k] = nested
-        elif v not in (None, "", [], {}):
-            cleaned[k] = v
-
-    return cleaned
 
 
 
@@ -183,9 +196,12 @@ def remove_configmap(namespace: str, configmap_name: str, remove_pipeline: dict)
     service     = remove_pipeline['service']    if 'service' in remove_pipeline else dict()
     
     update_remove_configmaps = [(receiver, 'receivers'), (processor, 'processors'), (exporter, 'exporters'), (service, 'service')]
+    removed_paths = []
     for new_configmap in update_remove_configmaps:
-        __remove_configmap(new_configmap[0], configmap_yaml[new_configmap[1]])
-    configmap_yaml = __clean_empty(configmap_yaml)
+            removed = __remove_configmap(new_configmap[0], configmap_yaml[new_configmap[1]], new_configmap[1])
+            removed_paths.extend(removed)
+
+    __clean_removed_paths(configmap_yaml, removed_paths)
     if configmap_name is not None:
         try:
             updated_yaml = yaml.safe_dump(configmap_yaml)

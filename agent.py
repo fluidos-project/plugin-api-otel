@@ -67,18 +67,29 @@ def __load_test_configmap():
         except yaml.YAMLError as exc:
             print(exc)
             
-def __clean_empty(d):
-    """
-    Clean empty values from a dictionary.
-    """
+def __clean_empty(d, parent_key=""):
     if not isinstance(d, dict):
         return d
 
-    return {
-        k: __clean_empty(v)
-        for k, v in d.items()
-        if v not in (None, {}, [], '') and not (isinstance(v, dict) and not __clean_empty(v))
-    }
+    cleaned = {}
+    for k, v in d.items():
+        current_path = f"{parent_key}.{k}" if parent_key else k
+
+        # 'scrapers', dont remove
+        if "scrapers" in current_path.split("."):
+            cleaned[k] = v if not isinstance(v, dict) else __clean_empty(v, current_path)
+            continue
+
+
+        if isinstance(v, dict):
+            nested = __clean_empty(v, current_path)
+            if nested:
+                cleaned[k] = nested
+        elif v not in (None, "", [], {}):
+            cleaned[k] = v
+
+    return cleaned
+
 
 
 # Update the ConfigMap with the new pipeline configuration

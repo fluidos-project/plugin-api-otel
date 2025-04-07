@@ -29,3 +29,30 @@ curl -X PUT http://localhost:8000/configurations \
     }
   }
 }'
+
+
+
+
+curl --location --request DELETE 'http://localhost:8000/configurations' \
+--header 'Content-Type: application/json' \
+--data '{
+  "namespace": null,
+  "configmap_name": null,
+  "receivers": {
+  },
+  "processors": {
+    "filter/privacy": {
+      "metrics": {
+        "exclude": {
+          "match_type": "regexp",
+          "metric_names": [
+            "node_disk_info"
+          ]
+        }
+      }
+    }
+  },
+  "exporters": {},
+  "service": {}
+}
+'

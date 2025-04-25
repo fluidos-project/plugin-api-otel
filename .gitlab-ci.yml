@@ -34,26 +34,14 @@ build_and_test_image:
     - name: docker:25.0.3-dind
   variables:
     DOCKER_TLS_CERTDIR: ""
-  before_script:
-    - apk add --no-cache python3 py3-pip
-    - python3 -m venv venv
-    - source venv/bin/activate
-    - pip install -r requirements.txt
   script:
     - echo "Construyendo plugin-api-otel"
     - docker build -t $IMAGE_TAG .
     - echo "Imagen construida exitosamente"
 
-    - echo "Ejecutando la imagen"
-    - docker run -d -p 8000:8000 --name otel-api-pluging-test $IMAGE_TAG
-    - echo "Esperando a que arranque"
-    - sleep 5
-    - echo "Testeando imagen..."
-    - pytest test/
-
-    - echo "Matando y limpiando contenedor de test..."
-    - docker stop otel-api-pluging-test && docker rm otel-api-pluging-test
+    - echo "Testeando la imagen con pytest"
+    - docker run --rm $IMAGE_TAG pytest test/
 
     - echo "Publicando imagen de plugin-api-otel"
-    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
     - docker push $IMAGE_TAG

@@ -40,7 +40,7 @@ build_and_test_image:
     - echo "Imagen construida exitosamente"
 
     - echo "Testeando la imagen con pytest"
-    - docker run --rm $IMAGE_TAG pytest test/
+    - docker run --rm -v $(pwd)/test:/app/test $IMAGE_TAG pytest test/
 
     - echo "Publicando imagen de plugin-api-otel"
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY

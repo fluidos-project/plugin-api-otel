@@ -163,7 +163,8 @@ def add_configmap(namespace: str, configmap_name: str, new_configmap: dict):
 
     if configmap_name is not None:
         try:
-            updated_yaml = yaml.safe_dump(configmap_yaml)
+            # updated_yaml = yaml.safe_dump(configmap_yaml)
+            updated_yaml = yaml.safe_dump(new_configmap)
             configmap.data['collector.yaml'] = updated_yaml
             v1.replace_namespaced_config_map(configmap_name, namespace, configmap)
             return configmap

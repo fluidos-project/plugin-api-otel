@@ -1,3 +1,4 @@
+// Debug mode
 curl -X PUT http://localhost:8000/configurations \
   -H "Content-Type: application/json" \
   -d '{
@@ -31,8 +32,41 @@ curl -X PUT http://localhost:8000/configurations \
 }'
 
 
+// Normal mode
+curl -X PUT http://localhost:8000/configurations \
+  -H "Content-Type: application/json" \
+  -d '{
+  "namespace": "monitoring",
+  "configmap_name": "collector-config",
+  "receivers": {
+    "hostmetrics": {
+      "collection_interval": "1s"
+    },
+    "kubeletstats": {
+      "collection_interval": "1"
+    }
+  },
+  "processors": {
+    "batch": {}
+  },
+  "exporters": {
+    "prometheus": {
+      "endpoint": "0.0.0.0:8889"
+    }
+  },
+  "service": {
+    "pipelines": {
+      "metrics/fluidosmonitoring": {
+        "receivers": ["hostmetrics", "kubeletstats"],
+        "processors": ["batch"],
+        "exporters": ["prometheus"]
+      }
+    }
+  }
+}'
 
 
+// Debug mode
 curl --location --request DELETE 'http://localhost:8000/configurations' \
 --header 'Content-Type: application/json' \
 --data '{
@@ -56,3 +90,9 @@ curl --location --request DELETE 'http://localhost:8000/configurations' \
   "service": {}
 }
 '
+
+
+curl -X POST http://localhost:8000/reload   -H "Content-Type: application/json"   -d '{
+    "namespace": "monitoring",
+    "label_selector": "app.kubernetes.io/name=opentelemetrycollector"
+}'

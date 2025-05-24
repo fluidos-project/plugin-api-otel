@@ -7,7 +7,7 @@ metadata:
     app: agent-api
 spec:
   selector:
-    app: agent-api
+    app.kubernetes.io/name: agent-api
   ports:
   - protocol: TCP
     port: 8000

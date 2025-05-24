@@ -1,0 +1,47 @@
+variables:
+  IMAGE_TAG: $CI_REGISTRY_IMAGE:latest
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+cache:
+  paths:
+    - .cache/pip
+
+default:
+  tags:
+    - docker
+    - priviledge
+    - shared
+
+stages:
+  - test
+  - build
+
+unit_tests:
+  stage: test
+  image: python:3.11
+  before_script:
+    - python -m venv venv
+    - source venv/bin/activate
+    - pip install -r requirements.txt
+  script:
+    - echo "Ejecutando tests unitarios"
+    - pytest
+
+build_and_test_image:
+  stage: build
+  image: docker:25.0.3
+  services:
+    - name: docker:25.0.3-dind
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+  script:
+    - echo "Construyendo plugin-api-otel"
+    - docker build -t $IMAGE_TAG .
+    - echo "Imagen construida exitosamente"
+
+    - echo "Testeando la imagen con pytest"
+    - docker run --rm -v $(pwd)/test:/app/test $IMAGE_TAG pytest test/
+
+    - echo "Publicando imagen de plugin-api-otel"
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
+    - docker push $IMAGE_TAG
